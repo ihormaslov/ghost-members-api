@@ -1,3 +1,4 @@
+const _ = require('lodash');
 const {Router} = require('express');
 const body = require('body-parser');
 const MagicLink = require('@tryghost/magic-link');
@@ -5,6 +6,7 @@ const StripePaymentProcessor = require('./lib/stripe');
 
 const Tokens = require('./lib/tokens');
 const Users = require('./lib/users');
+const Metadata = require('./lib/metadata');
 const common = require('./lib/common');
 
 module.exports = function MembersApi({
@@ -25,8 +27,8 @@ module.exports = function MembersApi({
         getHTML,
         getSubject
     },
-    setMetadata,
-    getMetadata,
+    memberStripeCustomerModel,
+    stripeCustomerSubscriptionModel,
     memberModel,
     logger
 }) {
@@ -35,13 +37,14 @@ module.exports = function MembersApi({
     }
 
     const {encodeIdentityToken, decodeToken} = Tokens({privateKey, publicKey, issuer});
+    const metadata = Metadata({memberStripeCustomerModel, stripeCustomerSubscriptionModel});
 
     const stripeStorage = {
         async get(member) {
-            return getMetadata('stripe', member);
+            return metadata.getMetadata('stripe', member);
         },
-        async set(metadata) {
-            return setMetadata('stripe', metadata);
+        async set(data) {
+            return metadata.setMetadata('stripe', data);
         }
     };
     const stripe = paymentConfig.stripe ? new StripePaymentProcessor(paymentConfig.stripe, stripeStorage, common.logging) : null;
@@ -83,7 +86,6 @@ module.exports = function MembersApi({
     }
 
     const users = Users({
-        sendEmailWithMagicLink,
         stripe,
         memberModel
     });
@@ -115,7 +117,8 @@ module.exports = function MembersApi({
         sendMagicLink: Router(),
         createCheckoutSession: Router(),
         handleStripeWebhook: Router(),
-        updateSubscription: Router({mergeParams: true})
+        updateSubscription: Router({mergeParams: true}),
+        handleLogin: Router(),
     };
 
     middleware.sendMagicLink.use(body.json(), async function (req, res) {
@@ -219,6 +222,12 @@ module.exports = function MembersApi({
                 const member = await users.get({email: customer.email}) || await users.create({email: customer.email});
                 await stripe.handleCheckoutSessionCompletedWebhook(member, customer);
 
+                const payerName = _.get(customer, 'subscriptions.data[0].default_payment_method.billing_details.name');
+
+                if (payerName && !member.name) {
+                    await users.update({name: payerName}, {id: member.id});
+                }
+
                 const emailType = 'signup';
                 await sendEmailWithMagicLink(customer.email, emailType, {forceEmailType: true});
             }
@@ -283,6 +292,18 @@ module.exports = function MembersApi({
         res.end();
     });
 
+    middleware.handleLogin.use(body.json(), async function (req, res) {
+        const email = req.body.email;
+        if (!email) {
+            res.writeHead(400);
+            return res.end('Bad Request.');
+        }
+        const emailType = req.body.emailType;
+        
+        res.writeHead(201);
+        return res.end('Created.')
+    });
+
     const getPublicConfig = function () {
         return Promise.resolve({
             publicKey,
@@ -309,6 +330,7 @@ module.exports = function MembersApi({
         getMemberIdentityData,
         getPublicConfig,
         bus,
+        sendEmailWithMagicLink,
         members: users
     };
 };
