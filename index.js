@@ -1,5 +1,4 @@
 const _ = require('lodash');
-const jwt = require('jsonwebtoken');
 const {Router} = require('express');
 const body = require('body-parser');
 const MagicLink = require('@tryghost/magic-link');
@@ -120,7 +119,6 @@ module.exports = function MembersApi({
         handleStripeWebhook: Router(),
         updateSubscription: Router({mergeParams: true}),
         handleLogin: Router(),
-        handleCreateAccount: Router(),
     };
 
     middleware.sendMagicLink.use(body.json(), async function (req, res) {
@@ -296,53 +294,14 @@ module.exports = function MembersApi({
 
     middleware.handleLogin.use(body.json(), async function (req, res) {
         const email = req.body.email;
-        const password = req.body.password;
-        if (!email && !password) {
+        if (!email) {
             res.writeHead(400);
             return res.end('Bad Request.');
         }
-
-        const member = await getMemberIdentityData(email);
-        if (!member) {
-            res.writeHead(400);
-            return res.end('Bad Request.');
-        }
-
-        if (member.password === password){
-            const token = jwt.sign({}, secret, {
-                algorithm: 'HS256',
-                subject: email,
-                expiresIn: '10m'
-            }); 
-            return res.redirect('/?token='+ token + '&action=signin')
-        }
+        const emailType = req.body.emailType;
         
-        res.writeHead(400);
-        return res.end('Wrong password.')
-    });
-
-    middleware.handleCreateAccount.use(body.json(), async function (req, res) {
-        const email = req.body.email;
-        const password = req.body.password;
-        if (!email && !password) {
-            res.writeHead(400);
-            return res.end('Bad Request.');
-        }
-
-        const member = users.create({email, password}).catch((error) => {
-            return Promise.reject(Error(error));
-        })
-
-        const token = jwt.sign({}, secret, {
-            algorithm: 'HS256',
-            subject: email,
-            expiresIn: '10m'
-        });
-
-        // res.writeHead(201);
-        // return res.end('Created.');
-        // const url = this.getSigninURL(token, 'signin');
-        return res.redirect('/?token='+ token + '&action=signup')
+        res.writeHead(201);
+        return res.end('Created.')
     });
 
     const getPublicConfig = function () {
